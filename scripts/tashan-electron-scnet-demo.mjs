@@ -21,6 +21,7 @@ const defaultExePath = join(
 const outputArgIndex = process.argv.indexOf("--output");
 const keepAlive = process.argv.includes("--keep-alive");
 const checkKnowledgeStarter = process.argv.includes("--check-knowledge-starter");
+const checkPluginDigitalEmployee = process.argv.includes("--check-plugin-digital-employee");
 const complexReadmeScreenshot = process.argv.includes("--complex-readme-screenshot");
 const complexReadmeSubmit = process.argv.includes("--complex-readme-submit");
 const outputDir = outputArgIndex >= 0 && process.argv[outputArgIndex + 1]
@@ -381,6 +382,81 @@ async function checkKnowledgeStarterPath(client, outputDir) {
   };
 }
 
+async function checkPluginDigitalEmployeePath(client, outputDir) {
+  const result = await evaluate(client, `
+    (async () => {
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const buttonText = (button) => (button.innerText || button.textContent || "").replace(/\\s+/g, " ").trim();
+      const buttons = () => Array.from(document.querySelectorAll("button"));
+      const toolButton = buttons()
+        .filter((button) => {
+          const title = button.getAttribute("title") || "";
+          const label = button.getAttribute("aria-label") || "";
+          return title.includes("命令") || title.includes("MCP") || label.includes("命令") || label.includes("MCP");
+        })
+        .sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)[0];
+      if (!toolButton) {
+        return {
+          ok: false,
+          step: "find-composer-plugin-button",
+          buttonTexts: buttons().map(buttonText).filter(Boolean).slice(0, 120)
+        };
+      }
+      toolButton.click();
+      await sleep(1200);
+
+      const hasDigitalEmployeeGroup = (document.body.innerText || "").includes("数字员工");
+      const employeeButton = buttons().find((button) => buttonText(button) === "企业知识管理")
+        || buttons().find((button) => buttonText(button).includes("企业知识管理"));
+      if (!employeeButton) {
+        return {
+          ok: false,
+          step: "find-imported-plugin-section",
+          hasDigitalEmployeeGroup,
+          bodyPreview: (document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 1400),
+          buttonTexts: buttons().map(buttonText).filter(Boolean).slice(0, 120)
+        };
+      }
+      employeeButton.click();
+      await sleep(500);
+
+      const employeeLeft = employeeButton.getBoundingClientRect().left;
+      const fileButton = buttons()
+        .filter((button) => button !== employeeButton)
+        .filter((button) => buttonText(button).includes("企业知识管理"))
+        .filter((button) => button.getBoundingClientRect().left > employeeLeft + 50)[0]
+        || buttons().find((button) => buttonText(button).includes("企业知识管理") && buttonText(button).includes("Command"));
+      if (!fileButton) {
+        return {
+          ok: false,
+          step: "find-plugin-command-file",
+          hasDigitalEmployeeGroup,
+          bodyPreview: (document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 1400),
+          buttonTexts: buttons().map(buttonText).filter(Boolean).slice(0, 120)
+        };
+      }
+      fileButton.click();
+      await sleep(800);
+
+      const composer = window.__openwork?.slice?.("composer") ?? null;
+      const draft = String(composer?.draft || "");
+      return {
+        ok: draft.includes("/tashan-digital-employees/knowledge-navigator"),
+        hasDigitalEmployeeGroup,
+        draft,
+        bodyPreview: (document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 1200)
+      };
+    })()
+  `, 30_000);
+
+  const screenshotPath = join(outputDir, "tashan-plugin-digital-employee-selection.png");
+  const screenshotCaptured = await captureScreenshot(client, screenshotPath);
+  return {
+    ...sanitizeForEvidence(result),
+    screenshot: screenshotCaptured ? screenshotPath : null,
+  };
+}
+
 async function prepareComplexReadmeScreenshot(client, outputDir, options = {}) {
   const submitTask = Boolean(options.submitTask);
   const openResult = await evaluate(client, `
@@ -713,6 +789,24 @@ async function main() {
       throw new Error("Workspace did not expose opencode.baseUrl");
     }
 
+    const workspaceOpenworkPath = join(workspaceRoot, ".opencode", "openwork.json");
+    const commandRoot = join(workspaceRoot, ".opencode", "commands", "tashan-digital-employees");
+    const workspaceOpenwork = existsSync(workspaceOpenworkPath)
+      ? JSON.parse(await readFile(workspaceOpenworkPath, "utf8"))
+      : {};
+    const digitalEmployeePlugins = Object.keys(workspaceOpenwork?.cloudImports?.plugins ?? {})
+      .filter((pluginId) => pluginId.startsWith("tashan-"));
+    summary.checks.digitalEmployeePluginConfig = {
+      pluginCount: digitalEmployeePlugins.length,
+      plugins: digitalEmployeePlugins,
+      commandFiles: [
+        "research-writer.md",
+        "project-manager.md",
+        "knowledge-navigator.md",
+        "decision-support.md",
+      ].filter((name) => existsSync(join(commandRoot, name))),
+    };
+
     await fetchJson(`${serverInfo.baseUrl}/workspace/${encodeURIComponent(workspace.id)}/config`, {
       method: "PATCH",
       headers,
@@ -815,6 +909,12 @@ async function main() {
       summary.artifacts.knowledgeStarterScreenshot = knowledgeStarter.screenshot ?? null;
     }
 
+    if (checkPluginDigitalEmployee) {
+      const pluginDigitalEmployee = await checkPluginDigitalEmployeePath(client, outputDir);
+      summary.checks.pluginDigitalEmployee = pluginDigitalEmployee;
+      summary.artifacts.pluginDigitalEmployeeScreenshot = pluginDigitalEmployee.screenshot ?? null;
+    }
+
     if (complexReadmeScreenshot || complexReadmeSubmit) {
       const previousAssistantTexts = complexReadmeSubmit
         ? await listAssistantTexts(opencode, session.id).catch(() => [])
@@ -863,6 +963,7 @@ async function main() {
       summary.checks.cdpVisibleText.forbiddenVisible.length === 0 &&
       !summary.checks.cdpVisibleText.containsReasoningPreamble &&
       (!checkKnowledgeStarter || summary.checks.knowledgeStarter?.ok === true) &&
+      (!checkPluginDigitalEmployee || summary.checks.pluginDigitalEmployee?.ok === true) &&
       (!complexReadmeScreenshot || summary.checks.complexReadmeScreenshot?.ok === true) &&
       (!complexReadmeSubmit || summary.checks.complexReadmeSubmission?.ok === true)
     );

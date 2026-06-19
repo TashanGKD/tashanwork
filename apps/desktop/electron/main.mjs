@@ -459,6 +459,238 @@ async function pathExists(targetPath) {
   }
 }
 
+function resolveTashanPrebuiltSkillsRoot() {
+  const candidates = [
+    path.join(process.resourcesPath ?? "", "tashan-prebuilt-skills"),
+    path.resolve(__dirname, "..", "..", "..", "skills", "tashan-prebuilt"),
+  ];
+  return candidates.find((candidate) => candidate && existsSync(candidate)) ?? null;
+}
+
+function isPathInside(parent, child) {
+  const parentPath = path.resolve(parent).toLowerCase();
+  const childPath = path.resolve(child).toLowerCase();
+  return childPath === parentPath || childPath.startsWith(`${parentPath}${path.sep}`);
+}
+
+const TASHAN_DIGITAL_EMPLOYEE_MARKETPLACE_ID = "tashanwork-digital-employees";
+const TASHAN_DIGITAL_EMPLOYEES = [
+  {
+    id: "research-writer",
+    name: "研究写作员工",
+    pluginId: "tashan-research-writer",
+    command: "research-writer",
+    description: "调研、方案、竞品与汇报。",
+    skills: ["Deep Research", "论文检索", "幻觉检查", "AIGC痕迹检测"],
+    permissions: ["读取项目文件", "打开网页", "生成任务清单", "人工确认外部引用"],
+    prompt: "作为他山企业数字员工，先确认业务目标和输入资料，再输出可执行任务计划，包含所需文件、工具调用、风险点和验收标准。不要反问数字员工是什么；你就是当前被调用的数字员工。",
+  },
+  {
+    id: "workflow-planner",
+    name: "项目管理",
+    pluginId: "tashan-project-manager",
+    command: "project-manager",
+    description: "阶段拆解、确认点和执行计划。",
+    skills: ["任务拆解", "里程碑规划", "会议纪要", "风险跟踪"],
+    permissions: ["创建 Todo", "读取会话事件", "生成执行计划", "关键节点人工确认"],
+    prompt: "把当前企业知识工作任务拆成可执行任务流：阶段、负责人角色、输入输出、工具权限、人工确认点和审计记录要求。不要反问数字员工是什么；你就是当前被调用的数字员工。",
+  },
+  {
+    id: "knowledge-steward",
+    name: "企业知识管理",
+    pluginId: "tashan-knowledge-navigator",
+    command: "knowledge-navigator",
+    description: "资料库与知识索引。",
+    skills: ["资料分类", "知识索引", "字段设计", "缺失资料识别"],
+    permissions: ["读取项目文件", "访问授权目录", "生成索引草案", "敏感文件人工确认"],
+    prompt: "基于当前工作区文件生成第一版知识索引方案。输出包含资料分类与命名规则、关键文件和摘要字段、缺失资料清单、文件读取权限确认点、建议索引表结构和下一步任务流。不要反问数字员工是什么；你就是当前被调用的数字员工。",
+  },
+  {
+    id: "permission-auditor",
+    name: "审批决策",
+    pluginId: "tashan-decision-support",
+    command: "decision-support",
+    description: "工具调用、人机确认和审计记录。",
+    skills: ["风险识别", "审批建议", "审计摘要", "制度对照"],
+    permissions: ["读取权限事件", "读取制度文件", "生成审计记录", "高风险操作人工确认"],
+    prompt: "审计当前任务可能发生的工具调用、文件读写、浏览器访问和外部 API 使用，列出需要人工确认的权限点、审计记录字段和演示时的安全话术。不要反问数字员工是什么；你就是当前被调用的数字员工。",
+  },
+];
+
+function buildTashanCommandContent(employee) {
+  return [
+    "---",
+    `name: ${JSON.stringify(`tashan-digital-employees/${employee.command}`)}`,
+    `description: ${JSON.stringify(employee.description)}`,
+    'agent: "build"',
+    "subtask: false",
+    "---",
+    "",
+    `# ${employee.name}`,
+    "",
+    employee.prompt,
+    "",
+    `可用技能：${employee.skills.join("、")}`,
+    `权限策略：${employee.permissions.join("、")}`,
+    "",
+    "执行要求：先给出计划，再基于用户输入推进；需要读取文件、访问外部资源、写入文件或执行命令时先说明范围和风险。",
+    "",
+    "$ARGUMENTS",
+    "",
+  ].join("\n");
+}
+
+async function readJsonFileOrDefault(filePath, fallback) {
+  if (!(await pathExists(filePath))) return fallback;
+  const raw = await readFile(filePath, "utf8");
+  return JSON.parse(raw);
+}
+
+async function syncTashanDigitalEmployeePlugins(workspaceRoot) {
+  const opencodeRoot = path.join(workspaceRoot, ".opencode");
+  const commandRoot = path.join(opencodeRoot, "commands", "tashan-digital-employees");
+  const openworkPath = path.join(opencodeRoot, "openwork.json");
+
+  if (!isPathInside(workspaceRoot, commandRoot) || !isPathInside(workspaceRoot, openworkPath)) {
+    throw new Error("Refusing to sync Tashan digital employees outside workspace");
+  }
+
+  await mkdir(commandRoot, { recursive: true });
+  for (const employee of TASHAN_DIGITAL_EMPLOYEES) {
+    const commandPath = path.join(commandRoot, `${employee.command}.md`);
+    await writeFile(commandPath, buildTashanCommandContent(employee), "utf8");
+  }
+
+  const config = await readJsonFileOrDefault(openworkPath, {});
+  const cloudImports = typeof config.cloudImports === "object" && config.cloudImports !== null && !Array.isArray(config.cloudImports)
+    ? config.cloudImports
+    : {};
+  const existingMarketplaces = typeof cloudImports.marketplaces === "object" && cloudImports.marketplaces !== null && !Array.isArray(cloudImports.marketplaces)
+    ? cloudImports.marketplaces
+    : {};
+  const existingPlugins = typeof cloudImports.plugins === "object" && cloudImports.plugins !== null && !Array.isArray(cloudImports.plugins)
+    ? cloudImports.plugins
+    : {};
+  const now = Date.now();
+  const pluginIds = TASHAN_DIGITAL_EMPLOYEES.map((employee) => employee.pluginId);
+  const plugins = {
+    ...existingPlugins,
+    ...Object.fromEntries(TASHAN_DIGITAL_EMPLOYEES.map((employee) => [
+      employee.pluginId,
+      {
+        pluginId: employee.pluginId,
+        marketplaceId: TASHAN_DIGITAL_EMPLOYEE_MARKETPLACE_ID,
+        name: employee.name,
+        description: employee.description,
+        updatedAt: null,
+        importedAt: now,
+        files: [
+          {
+            configObjectId: `${employee.pluginId}:command:${employee.command}`,
+            versionId: null,
+            objectType: "command",
+            title: employee.name,
+            path: `.opencode/commands/tashan-digital-employees/${employee.command}.md`,
+            updatedAt: null,
+          },
+        ],
+      },
+    ])),
+  };
+  const nextConfig = {
+    ...config,
+    cloudImports: {
+      ...cloudImports,
+      marketplaces: {
+        ...existingMarketplaces,
+        [TASHAN_DIGITAL_EMPLOYEE_MARKETPLACE_ID]: {
+          marketplaceId: TASHAN_DIGITAL_EMPLOYEE_MARKETPLACE_ID,
+          name: "TashanWork 数字员工",
+          updatedAt: null,
+          importedAt: now,
+          pluginIds,
+        },
+      },
+      plugins,
+    },
+  };
+  await mkdir(path.dirname(openworkPath), { recursive: true });
+  await writeFile(openworkPath, `${JSON.stringify(nextConfig, null, 2)}\n`, "utf8");
+
+  return { installedCount: TASHAN_DIGITAL_EMPLOYEES.length, commandRoot, openworkPath };
+}
+
+async function syncTashanPrebuiltSkills(workspaceRoot) {
+  const resolvedWorkspaceRoot = path.resolve(String(workspaceRoot ?? "").trim());
+  if (!resolvedWorkspaceRoot || !(await isDirectory(resolvedWorkspaceRoot))) {
+    return { ok: false, skipped: true, reason: "workspace-not-found" };
+  }
+
+  const sourceRoot = resolveTashanPrebuiltSkillsRoot();
+  if (!sourceRoot || !(await isDirectory(sourceRoot))) {
+    return { ok: false, skipped: true, reason: "prebuilt-skills-source-not-found" };
+  }
+
+  const installRoot = path.join(resolvedWorkspaceRoot, ".opencode", "skills", "tashan");
+  if (!isPathInside(resolvedWorkspaceRoot, installRoot)) {
+    throw new Error(`Refusing to sync Tashan skills outside workspace: ${installRoot}`);
+  }
+
+  await mkdir(installRoot, { recursive: true });
+  const entries = await readdir(sourceRoot, { withFileTypes: true });
+  const installed = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const source = path.join(sourceRoot, entry.name);
+    const skillFile = path.join(source, "SKILL.md");
+    if (!(await pathExists(skillFile))) continue;
+    const destination = path.join(installRoot, entry.name);
+    if (!isPathInside(installRoot, destination)) {
+      throw new Error(`Refusing unsafe Tashan skill path: ${destination}`);
+    }
+    await cp(source, destination, { recursive: true, force: true });
+    installed.push(entry.name);
+  }
+  const employees = await syncTashanDigitalEmployeePlugins(resolvedWorkspaceRoot);
+
+  return {
+    ok: true,
+    skipped: false,
+    sourceRoot,
+    installRoot,
+    installedCount: installed.length,
+    installed,
+    digitalEmployees: employees,
+  };
+}
+
+async function syncTashanSkillsForWorkspace(workspace) {
+  const workspaceRoot = String(workspace?.path ?? "").trim();
+  if (!workspaceRoot || workspace?.workspaceType === "remote") return null;
+  try {
+    const result = await syncTashanPrebuiltSkills(workspaceRoot);
+    if (result?.ok) {
+      console.info("[tashan] synced prebuilt skills and digital employees", {
+        workspaceRoot,
+        installedCount: result.installedCount,
+        digitalEmployeeCount: result.digitalEmployees?.installedCount ?? 0,
+      });
+    } else {
+      console.warn("[tashan] skipped prebuilt skill sync", {
+        workspaceRoot,
+        reason: result?.reason ?? "unknown",
+      });
+    }
+    return result;
+  } catch (error) {
+    console.warn("[tashan] prebuilt skill sync failed", {
+      workspaceRoot,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 async function isDirectory(targetPath) {
   try {
     return (await stat(targetPath)).isDirectory();
@@ -600,6 +832,7 @@ async function bootRuntimeForSelectedWorkspace() {
   let bootWorkspaceRoot = workspaceRoot;
   let engine;
   try {
+    await syncTashanSkillsForWorkspace(workspace);
     engine = await runtimeManager.engineStart(workspaceRoot, {
       runtime: "direct",
       workspacePaths,
@@ -620,6 +853,7 @@ async function bootRuntimeForSelectedWorkspace() {
       fallbackRoot,
       ...workspacePaths.filter((entry) => entry !== fallbackRoot && entry !== workspaceRoot),
     ];
+    await syncTashanSkillsForWorkspace(fallback);
     engine = await runtimeManager.engineStart(fallbackRoot, {
       runtime: "direct",
       workspacePaths: fallbackWorkspacePaths,
@@ -942,13 +1176,23 @@ const desktopCommandHandlers = {
       return workspaceStore.readWorkspaceState();
   },
   "workspaceSetSelected": async (event, ...args) => {
-      return workspaceStore.setSelectedWorkspace(typeof args[0] === "string" ? args[0] : "");
+      const state = await workspaceStore.setSelectedWorkspace(typeof args[0] === "string" ? args[0] : "");
+      const workspace = state.workspaces.find((entry) => entry?.id === state.selectedId);
+      await syncTashanSkillsForWorkspace(workspace);
+      return state;
   },
   "workspaceSetRuntimeActive": async (event, ...args) => {
-      return workspaceStore.setRuntimeActiveWorkspace(typeof args[0] === "string" && args[0].trim() ? args[0] : null);
+      const workspaceId = typeof args[0] === "string" && args[0].trim() ? args[0] : null;
+      const state = await workspaceStore.setRuntimeActiveWorkspace(workspaceId);
+      const workspace = state.workspaces.find((entry) => entry?.id === workspaceId);
+      await syncTashanSkillsForWorkspace(workspace);
+      return state;
   },
   "workspaceCreate": async (event, ...args) => {
-      return workspaceStore.createWorkspace(args[0] ?? {});
+      const state = await workspaceStore.createWorkspace(args[0] ?? {});
+      const workspace = state.workspaces.find((entry) => entry?.id === state.selectedId);
+      await syncTashanSkillsForWorkspace(workspace);
+      return state;
   },
   "workspaceCreateRemote": async (event, ...args) => {
       return workspaceStore.createRemoteWorkspace(args[0] ?? {});
@@ -1000,6 +1244,7 @@ const desktopCommandHandlers = {
   "engineStart": async (event, ...args) => {
       const projectDir = String(args[0] ?? "").trim();
       const options = args[1] ?? {};
+      await syncTashanSkillsForWorkspace({ path: projectDir, workspaceType: "local" });
       return runtimeManager.engineStart(projectDir, options);
   },
   "prepareFreshRuntime": async (event, ...args) => {
