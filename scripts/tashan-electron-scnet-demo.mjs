@@ -21,10 +21,22 @@ const defaultExePath = join(
 const outputArgIndex = process.argv.indexOf("--output");
 const keepAlive = process.argv.includes("--keep-alive");
 const checkKnowledgeStarter = process.argv.includes("--check-knowledge-starter");
+const complexReadmeScreenshot = process.argv.includes("--complex-readme-screenshot");
+const complexReadmeSubmit = process.argv.includes("--complex-readme-submit");
 const outputDir = outputArgIndex >= 0 && process.argv[outputArgIndex + 1]
   ? resolve(process.argv[outputArgIndex + 1])
   : join(outerRoot, "outputs", "loop", "evidence", timestampSlug());
 const knowledgePromptMarker = "作为他山企业资料库数字员工";
+const complexTaskPrompt = [
+  "@企业知识管理 请基于当前项目空间里的资料，完成一份“企业 AI 工作台落地方案”的初版交付。",
+  "",
+  "要求：",
+  "1. 先列出你会读取和整理哪些资料，并把任务拆成 5-7 个可检查步骤。",
+  "2. 汇总项目目标、现有能力、缺口、主要风险和明天可演示路径。",
+  "3. 输出一份面向管理层的中文方案，包含：背景、目标用户、核心场景、数字员工配置、资料库使用方式、权限确认流程、模型接入方式、部署风险和下一步计划。",
+  "4. 遇到需要读取文件、调用工具或执行可能影响工作区的操作时，先说明原因并等待确认。",
+  "5. 最后给出一个 100 分制的完成度评分，并列出最大扣分项。",
+].join("\n");
 
 function timestampSlug() {
   return new Date().toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
@@ -95,6 +107,10 @@ function unwrapOpencode(result, label, allowNoBody = false) {
 }
 
 function assistantText(value) {
+  return assistantTexts(value).join("\n").replace(/\s+/g, " ").trim().slice(0, 1200);
+}
+
+function assistantTexts(value) {
   const list = Array.isArray(value)
     ? value
     : Array.isArray(value?.items)
@@ -110,7 +126,9 @@ function assistantText(value) {
       if (part?.type === "text" && typeof part.text === "string") chunks.push(part.text);
     }
   }
-  return chunks.join("\n").replace(/\s+/g, " ").trim().slice(0, 1200);
+  return chunks
+    .map((text) => text.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
 }
 
 async function waitForAssistant(opencode, sessionId, timeoutMs = 180_000) {
@@ -130,6 +148,46 @@ async function waitForAssistant(opencode, sessionId, timeoutMs = 180_000) {
     await sleep(2500);
   }
   return { ok: false, preview, status };
+}
+
+async function listAssistantTexts(opencode, sessionId) {
+  const messages = unwrapOpencode(
+    await opencode.session.messages({ sessionID: sessionId, limit: 50 }),
+    "session.messages",
+  );
+  return assistantTexts(messages);
+}
+
+async function waitForNewAssistant(opencode, sessionId, previousTexts, timeoutMs = 300_000) {
+  const deadline = Date.now() + timeoutMs;
+  const previous = new Set(previousTexts);
+  let preview = "";
+  let status = null;
+  let lastPreview = "";
+  let lastChangedAt = Date.now();
+  while (Date.now() < deadline) {
+    status = await opencode.session.status().then((result) => result.data ?? null).catch(() => null);
+    const texts = await listAssistantTexts(opencode, sessionId).catch(() => []);
+    const next = texts.filter((text) =>
+      !previous.has(text) &&
+      text.length >= 20 &&
+      !/^他山模型接入通过。?$/.test(text)
+    ).at(-1);
+    preview = next || texts.at(-1) || preview;
+    if (preview && preview !== lastPreview) {
+      lastPreview = preview;
+      lastChangedAt = Date.now();
+    }
+    const isBusy = status?.[sessionId]?.type === "busy";
+    if (next && !isBusy && Date.now() - lastChangedAt >= 3000) {
+      return { ok: true, preview: next.slice(0, 1200), status, completed: true };
+    }
+    if (next && Date.now() - lastChangedAt >= 30_000) {
+      return { ok: true, preview: next.slice(0, 1200), status, completed: !isBusy, stableButBusy: isBusy };
+    }
+    await sleep(3000);
+  }
+  return { ok: false, preview: preview.slice(0, 1200), status, completed: false };
 }
 
 async function getJson(url) {
@@ -321,6 +379,169 @@ async function checkKnowledgeStarterPath(client, outputDir) {
     after: sanitizeForEvidence(after),
     screenshot: screenshotCaptured ? screenshotPath : null,
   };
+}
+
+async function prepareComplexReadmeScreenshot(client, outputDir, options = {}) {
+  const submitTask = Boolean(options.submitTask);
+  const openResult = await evaluate(client, `
+    (async () => {
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const buttonText = (button) => (button.innerText || button.textContent || "").replace(/\\s+/g, " ").trim();
+      const buttons = () => Array.from(document.querySelectorAll("button"));
+
+      const digitalRail = buttons()
+        .filter((button) =>
+          button.getAttribute("aria-label") === "数字员工" ||
+          button.getAttribute("title") === "数字员工"
+        )
+        .sort((a, b) => b.getBoundingClientRect().left - a.getBoundingClientRect().left)[0];
+      if (!digitalRail) {
+        return {
+          ok: false,
+          step: "open-digital-employee-rail",
+          buttonTexts: buttons().map(buttonText).filter(Boolean).slice(0, 80)
+        };
+      }
+      digitalRail.click();
+      await sleep(900);
+
+      const textAfterOpen = document.body.innerText || "";
+      const hasEmployeeList = textAfterOpen.includes("企业知识管理") && textAfterOpen.includes("数字员工");
+      const cards = Array.from(document.querySelectorAll("article"));
+      const knowledgeCard = cards.find((card) => (card.innerText || "").includes("企业知识管理"))
+        || cards.find((card) => (card.innerText || "").includes("研究写作员工"))
+        || null;
+      if (!knowledgeCard) {
+        return {
+          ok: false,
+          step: "find-employee-card",
+          hasEmployeeList,
+          bodyPreview: textAfterOpen.replace(/\\s+/g, " ").slice(0, 1200)
+        };
+      }
+
+      const detailButton = Array.from(knowledgeCard.querySelectorAll("button"))
+        .find((button) => /详情|配置|上岗/.test(buttonText(button)));
+      if (!detailButton) {
+        return {
+          ok: false,
+          step: "find-employee-detail-button",
+          cardText: (knowledgeCard.innerText || "").replace(/\\s+/g, " ").slice(0, 800)
+        };
+      }
+      detailButton.click();
+      await sleep(700);
+
+      const detailPanel = Array.from(document.querySelectorAll("div, section, article"))
+        .find((element) => {
+          const text = element.innerText || "";
+          return text.includes("挂载 Skills") && text.includes("挂载 MCP") && text.includes("权限策略");
+        });
+      if (detailPanel) {
+        detailPanel.scrollIntoView({ block: "center", inline: "nearest" });
+        await sleep(500);
+      }
+
+      const composer = document.querySelector("[contenteditable='true']");
+      if (composer) {
+        composer.focus();
+        document.execCommand("selectAll", false);
+        document.execCommand("insertText", false, ${JSON.stringify(complexTaskPrompt)});
+        composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: ${JSON.stringify(complexTaskPrompt)} }));
+      }
+      await sleep(500);
+
+      let startTaskClicked = false;
+      if (${JSON.stringify(submitTask)}) {
+        const startTaskButton = buttons()
+          .filter((button) => /开始任务|Start task/i.test(buttonText(button)))
+          .filter((button) => !button.disabled && button.getAttribute("aria-disabled") !== "true")
+          .sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top)[0];
+        if (!startTaskButton) {
+          return {
+            ok: false,
+            step: "find-start-task-button",
+            hasDigitalEmployeePanel: true,
+            hasKnowledgeEmployee: true,
+            hasEmployeeDetail: Boolean(detailPanel),
+            hasComplexPrompt: Boolean((document.body.innerText || "").includes("企业 AI 工作台落地方案")),
+            buttonTexts: buttons().map(buttonText).filter(Boolean).slice(0, 100)
+          };
+        }
+        startTaskButton.click();
+        startTaskClicked = true;
+        await sleep(1200);
+      }
+
+      const bodyText = document.body.innerText || "";
+      return {
+        ok: bodyText.includes("企业知识管理") &&
+          bodyText.includes("挂载 Skills") &&
+          bodyText.includes("挂载 MCP") &&
+          bodyText.includes("权限策略") &&
+          bodyText.includes("数字员工") &&
+          bodyText.includes("企业 AI 工作台落地方案"),
+        hasDigitalEmployeePanel: bodyText.includes("数字员工"),
+        hasKnowledgeEmployee: bodyText.includes("企业知识管理"),
+        hasEmployeeDetail: bodyText.includes("挂载 Skills") && bodyText.includes("挂载 MCP") && bodyText.includes("权限策略"),
+        hasComplexPrompt: bodyText.includes("企业 AI 工作台落地方案"),
+        submitted: ${JSON.stringify(submitTask)},
+        startTaskClicked,
+        bodyPreview: bodyText.replace(/\\s+/g, " ").slice(0, 1600)
+      };
+    })()
+  `, 30_000);
+
+  const screenshotPath = join(
+    outputDir,
+    submitTask
+      ? "tashanwork-complex-task-submitted-digital-employee.png"
+      : "tashanwork-complex-task-digital-employee.png",
+  );
+  const screenshotCaptured = await captureScreenshot(client, screenshotPath);
+  return {
+    ...sanitizeForEvidence(openResult),
+    screenshot: screenshotCaptured ? screenshotPath : null,
+  };
+}
+
+async function focusKnowledgeEmployeeDetail(client) {
+  const result = await evaluate(client, `
+    (async () => {
+      const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+      const buttonText = (button) => (button.innerText || button.textContent || "").replace(/\\s+/g, " ").trim();
+      const cards = Array.from(document.querySelectorAll("article"));
+      const knowledgeCard = cards.find((card) => (card.innerText || "").includes("企业知识管理"));
+      if (knowledgeCard) {
+        const detailButton = Array.from(knowledgeCard.querySelectorAll("button"))
+          .find((button) => /详情|配置/.test(buttonText(button)));
+        if (detailButton) {
+          detailButton.click();
+          await sleep(700);
+        }
+      }
+      const detailPanel = Array.from(document.querySelectorAll("div, section, article"))
+        .find((element) => {
+          const text = element.innerText || "";
+          return text.includes("企业知识管理") &&
+            text.includes("挂载 Skills") &&
+            text.includes("挂载 MCP") &&
+            text.includes("权限策略");
+        });
+      if (detailPanel) {
+        detailPanel.scrollIntoView({ block: "center", inline: "nearest" });
+        await sleep(500);
+      }
+      const bodyText = document.body.innerText || "";
+      return {
+        ok: Boolean(detailPanel),
+        hasKnowledgeEmployee: bodyText.includes("企业知识管理"),
+        hasEmployeeDetail: bodyText.includes("挂载 Skills") && bodyText.includes("挂载 MCP") && bodyText.includes("权限策略"),
+        bodyPreview: bodyText.replace(/\\s+/g, " ").slice(0, 1200)
+      };
+    })()
+  `, 20_000);
+  return sanitizeForEvidence(result);
 }
 
 function launchElectron(input) {
@@ -594,6 +815,28 @@ async function main() {
       summary.artifacts.knowledgeStarterScreenshot = knowledgeStarter.screenshot ?? null;
     }
 
+    if (complexReadmeScreenshot || complexReadmeSubmit) {
+      const previousAssistantTexts = complexReadmeSubmit
+        ? await listAssistantTexts(opencode, session.id).catch(() => [])
+        : [];
+      const complexScreenshot = await prepareComplexReadmeScreenshot(client, outputDir, {
+        submitTask: complexReadmeSubmit,
+      });
+      summary.checks.complexReadmeScreenshot = complexScreenshot;
+      summary.artifacts.complexReadmeScreenshot = complexScreenshot.screenshot ?? null;
+
+      if (complexReadmeSubmit && complexScreenshot?.ok && complexScreenshot?.startTaskClicked) {
+        const complexAssistant = await waitForNewAssistant(opencode, session.id, previousAssistantTexts);
+        summary.checks.complexReadmeSubmission = complexAssistant;
+        summary.checks.complexReadmeDetailRefocused = await focusKnowledgeEmployeeDetail(client);
+        await sleep(3000);
+        const complexResponseScreenshot = join(outputDir, "tashanwork-complex-task-response-digital-employee.png");
+        summary.artifacts.complexReadmeResponseScreenshot = await captureScreenshot(client, complexResponseScreenshot)
+          ? complexResponseScreenshot
+          : null;
+      }
+    }
+
     const consoleProblems = client.notifications
       .filter((entry) => entry.method === "Log.entryAdded" || entry.method === "Runtime.exceptionThrown")
       .map((entry) => JSON.stringify(entry).slice(0, 800));
@@ -619,7 +862,9 @@ async function main() {
       summary.checks.cdpVisibleText.containsDefaultDigitalEmployee &&
       summary.checks.cdpVisibleText.forbiddenVisible.length === 0 &&
       !summary.checks.cdpVisibleText.containsReasoningPreamble &&
-      (!checkKnowledgeStarter || summary.checks.knowledgeStarter?.ok === true)
+      (!checkKnowledgeStarter || summary.checks.knowledgeStarter?.ok === true) &&
+      (!complexReadmeScreenshot || summary.checks.complexReadmeScreenshot?.ok === true) &&
+      (!complexReadmeSubmit || summary.checks.complexReadmeSubmission?.ok === true)
     );
   } catch (error) {
     summary.error = error instanceof Error ? error.message : String(error);
