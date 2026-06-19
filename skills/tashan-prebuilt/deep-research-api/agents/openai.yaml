@@ -1,0 +1,4 @@
+interface:
+  display_name: "Deep Research API"
+  short_description: "Run Deep Research SSE with evidence checks."
+  default_prompt: "Use Deep Research API to answer this research question with references, status, and evidence limits."

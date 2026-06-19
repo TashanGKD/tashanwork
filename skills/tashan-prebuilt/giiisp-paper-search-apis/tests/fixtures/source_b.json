@@ -1,0 +1,10 @@
+[
+  {
+    "_source_platform": "openalex",
+    "title": "High Resolution Image Synthesis with Latent Diffusion Models",
+    "authors": ["Robin Rombach", "Andreas Blattmann"],
+    "year": 2022,
+    "doi": "https://doi.org/10.1109/cvpr52688.2022.01042",
+    "citationCount": 13564
+  }
+]

@@ -1,0 +1,173 @@
+{
+  "source": "C:\\Users\\16571\\Documents\\Codex\\2026-06-14\\files-mentioned-by-the-user-logo\\work\\tashan-agent-platform\\public\\assets\\avatars\\avatar-sheet-v1.png",
+  "avatars": [
+    {
+      "role": "procurement-specialist",
+      "file": "C:\\Users\\16571\\Documents\\Codex\\2026-06-14\\files-mentioned-by-the-user-logo\\work\\tashan-agent-platform\\public\\assets\\avatars\\v1\\01-procurement-specialist.png",
+      "sourceBox": [
+        35,
+        14,
+        349,
+        328
+      ],
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "role": "customer-success-manager",
+      "file": "C:\\Users\\16571\\Documents\\Codex\\2026-06-14\\files-mentioned-by-the-user-logo\\work\\tashan-agent-platform\\public\\assets\\avatars\\v1\\02-customer-success-manager.png",
+      "sourceBox": [
+        419,
+        14,
+        733,
+        328
+      ],
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "role": "data-analyst",
+      "file": "C:\\Users\\16571\\Documents\\Codex\\2026-06-14\\files-mentioned-by-the-user-logo\\work\\tashan-agent-platform\\public\\assets\\avatars\\v1\\03-data-analyst.png",
+      "sourceBox": [
+        803,
+        14,
+        1117,
+        328
+      ],
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "role": "presentation-specialist",
+      "file": "C:\\Users\\16571\\Documents\\Codex\\2026-06-14\\files-mentioned-by-the-user-logo\\work\\tashan-agent-platform\\public\\assets\\avatars\\v1\\04-presentation-specialist.png",
+      "sourceBox": [
+        1187,
+        14,
+        1501,
+        328
+      ],
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "role": "legal-advisor",
+      "file": "C:\\Users\\16571\\Documents\\Codex\\2026-06-14\\files-mentioned-by-the-user-logo\\work\\tashan-agent-platform\\public\\assets\\avatars\\v1\\05-legal-advisor.png",
+      "sourceBox": [
+        35,
+        355,
+        349,
+        669
+      ],
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "role": "product-researcher",
+      "file": "C:\\Users\\16571\\Documents\\Codex\\2026-06-14\\files-mentioned-by-the-user-logo\\work\\tashan-agent-platform\\public\\assets\\avatars\\v1\\06-product-researcher.png",
+      "sourceBox": [
+        419,
+        355,
+        733,
+        669
+      ],
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "role": "workflow-operator",
+      "file": "C:\\Users\\16571\\Documents\\Codex\\2026-06-14\\files-mentioned-by-the-user-logo\\work\\tashan-agent-platform\\public\\assets\\avatars\\v1\\07-workflow-operator.png",
+      "sourceBox": [
+        803,
+        355,
+        1117,
+        669
+      ],
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "role": "knowledge-librarian",
+      "file": "C:\\Users\\16571\\Documents\\Codex\\2026-06-14\\files-mentioned-by-the-user-logo\\work\\tashan-agent-platform\\public\\assets\\avatars\\v1\\08-knowledge-librarian.png",
+      "sourceBox": [
+        1187,
+        355,
+        1501,
+        669
+      ],
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "role": "design-assistant",
+      "file": "C:\\Users\\16571\\Documents\\Codex\\2026-06-14\\files-mentioned-by-the-user-logo\\work\\tashan-agent-platform\\public\\assets\\avatars\\v1\\09-design-assistant.png",
+      "sourceBox": [
+        35,
+        696,
+        349,
+        1010
+      ],
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "role": "operations-planner",
+      "file": "C:\\Users\\16571\\Documents\\Codex\\2026-06-14\\files-mentioned-by-the-user-logo\\work\\tashan-agent-platform\\public\\assets\\avatars\\v1\\10-operations-planner.png",
+      "sourceBox": [
+        419,
+        696,
+        733,
+        1010
+      ],
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "role": "finance-analyst",
+      "file": "C:\\Users\\16571\\Documents\\Codex\\2026-06-14\\files-mentioned-by-the-user-logo\\work\\tashan-agent-platform\\public\\assets\\avatars\\v1\\11-finance-analyst.png",
+      "sourceBox": [
+        803,
+        696,
+        1117,
+        1010
+      ],
+      "size": [
+        512,
+        512
+      ]
+    },
+    {
+      "role": "meeting-recap-specialist",
+      "file": "C:\\Users\\16571\\Documents\\Codex\\2026-06-14\\files-mentioned-by-the-user-logo\\work\\tashan-agent-platform\\public\\assets\\avatars\\v1\\12-meeting-recap-specialist.png",
+      "sourceBox": [
+        1187,
+        696,
+        1501,
+        1010
+      ],
+      "size": [
+        512,
+        512
+      ]
+    }
+  ]
+}

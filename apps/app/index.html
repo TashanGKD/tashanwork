@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TashanWork</title>
+
+    <link rel="icon" type="image/svg+xml" href="tashan-logo.svg" />
+    <link rel="apple-touch-icon" href="tashan-logo.svg" />
+    <script>
+      (function () {
+        try {
+          var mode = localStorage.getItem("openwork.themePref") || "system";
+          var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var resolved = mode === "dark" || (mode === "system" && prefersDark) ? "dark" : "light";
+          document.documentElement.dataset.theme = resolved;
+          document.documentElement.style.colorScheme = resolved;
+        } catch (e) {
+          document.documentElement.dataset.theme = "light";
+          document.documentElement.style.colorScheme = "light";
+        }
+      })();
+    </script>
+  </head>
+  <body class="bg-dls-surface text-dls-text mac:bg-transparent">
+    <div id="root"></div>
+    <script type="module" src="/src/index.react.tsx"></script>
+  </body>
+</html>

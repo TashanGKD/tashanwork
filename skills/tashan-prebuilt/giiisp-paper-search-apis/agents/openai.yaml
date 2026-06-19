@@ -1,0 +1,8 @@
+interface:
+  display_name: "科研论文检索与引用核验"
+  short_description: "构造 Giiisp 请求，路由开放源/CNKI 检索，并做引用审计"
+  brand_color: "#2563EB"
+  default_prompt: "Use $giiisp-paper-search-apis to build a dry-run Giiisp request, fallback literature search plan, and citation audit table for this research question."
+
+policy:
+  allow_implicit_invocation: true
