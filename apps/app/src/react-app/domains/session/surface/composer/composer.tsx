@@ -6,6 +6,7 @@ import fuzzysort from "fuzzysort";
 import { toast } from "@/components/ui/sonner";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuShortcut, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { OPENWORK_EXTENSION_CATALOG, type McpDirectoryInfo } from "@/app/constants";
+import { TASHAN_DIGITAL_EMPLOYEES } from "@/app/tashan-workbench";
 import type { CloudImportedPlugin, CloudImportedPluginFile } from "@/app/cloud/import-state";
 import type { ComposerAttachment, McpServerEntry, McpStatusMap, ModelRef, SkillCard, SlashCommandOption } from "@/app/types";
 import { formatBytes, isMacPlatform } from "@/app/utils";
@@ -34,7 +35,7 @@ type PastedTextChip = {
 };
 
 type ToolMenuSettingsSection = "commands" | "skills" | "mcps" | "plugins";
-type ToolMenuSection = "commands" | "skills" | "mcps" | "extensions" | `plugin:${string}`;
+type ToolMenuSection = "employees" | "commands" | "skills" | "mcps" | "extensions" | `plugin:${string}`;
 
 function isComposerExtensionAvailable(entry: McpDirectoryInfo) {
   const hasSessionSurface = entry.extensionManifest?.contributions?.some((contribution) =>
@@ -271,6 +272,20 @@ function pluginSlashCommandName(file: CloudImportedPluginFile) {
   return null;
 }
 
+function employeeForPlugin(plugin: CloudImportedPlugin) {
+  const pluginId = plugin.pluginId.trim().toLowerCase();
+  const pluginName = plugin.name.trim().toLowerCase();
+  return TASHAN_DIGITAL_EMPLOYEES.find((employee) =>
+    employee.pluginName.toLowerCase() === pluginId ||
+    employee.name.toLowerCase() === pluginName ||
+    employee.title.toLowerCase() === pluginName
+  ) ?? null;
+}
+
+function primaryPluginFile(plugin: CloudImportedPlugin) {
+  return plugin.files.find((file) => pluginSlashCommandName(file)) ?? plugin.files[0] ?? null;
+}
+
 export function ReactSessionComposer(props: ComposerProps) {
   const builtInExtensionsDisabled = useDesktopRestriction("allowBuiltInExtensions");
   let fileInput: HTMLInputElement | undefined;
@@ -288,7 +303,7 @@ export function ReactSessionComposer(props: ComposerProps) {
   const [pluginsLoading, setPluginsLoading] = useState(false);
   const [slashOpen, setSlashOpen] = useState(false);
   const [toolMenuOpen, setToolMenuOpen] = useState(false);
-  const [toolMenuSection, setToolMenuSection] = useState<ToolMenuSection>("commands");
+  const [toolMenuSection, setToolMenuSection] = useState<ToolMenuSection>("employees");
   const [mentionItems, setMentionItems] = useState<MentionItem[]>([]);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [menuIndex, setMenuIndex] = useState(0);
@@ -744,7 +759,7 @@ export function ReactSessionComposer(props: ComposerProps) {
   useEffect(() => {
     if (!toolMenuSection.startsWith("plugin:")) return;
     if (activePlugin) return;
-    setToolMenuSection("commands");
+    setToolMenuSection("employees");
   }, [activePlugin, toolMenuSection]);
 
   useEffect(() => {
@@ -1360,43 +1375,28 @@ export function ReactSessionComposer(props: ComposerProps) {
                     <div className="absolute bottom-full left-0 z-40 mb-3 w-[min(calc(100vw-2.5rem),34rem)] overflow-hidden rounded-[22px] border border-dls-border bg-dls-surface shadow-[var(--dls-shell-shadow)]">
                       <div className="grid grid-cols-[152px_minmax(0,1fr)] sm:grid-cols-[176px_minmax(0,1fr)]">
                         <div className="border-r border-dls-border bg-gray-2/30 p-2">
-                          {pluginSections.length > 0 ? (
-                            <>
-                              <div className="px-3 pb-1 pt-1 text-[11px] font-medium text-gray-9">数字员工</div>
-                              {pluginSections.map(({ section, plugin }) => (
-                                <button
-                                  key={plugin.pluginId}
-                                  type="button"
-                                  className={`mb-1 flex w-full items-center justify-between rounded-[16px] px-3 py-2.5 text-left text-sm transition-colors ${toolMenuSection === section ? "bg-gray-3 text-gray-12" : "text-gray-11 hover:bg-gray-2"}`}
-                                  onClick={() => setToolMenuSection(section)}
-                                >
-                                  <span className="truncate">{plugin.name}</span>
-                                  <ChevronRight size={14} className="shrink-0 text-gray-9" />
-                                </button>
-                              ))}
-                              <div className="my-2 border-t border-dls-border" />
-                            </>
-                          ) : (
-                            <div className="mb-2 rounded-[16px] px-3 py-2 text-[12px] text-gray-10">
-                              数字员工将从插件配置自动同步。
-                            </div>
-                          )}
                           {([
+                            ["employees", "数字员工"],
                             ["commands", t("dashboard.commands")],
                             ["skills", t("dashboard.skills")],
                             ["extensions", "内置扩展"],
                             ["mcps", t("composer.mcps_label")],
-                          ] as const).map(([section, label]) => (
-                            <button
-                              key={section}
-                              type="button"
-                              className={`mb-1 flex w-full items-center justify-between rounded-[16px] px-3 py-2.5 text-left text-sm transition-colors ${toolMenuSection === section ? "bg-gray-3 text-gray-12" : "text-gray-11 hover:bg-gray-2"}`}
-                              onClick={() => setToolMenuSection(section)}
-                            >
-                              <span className="truncate">{label}</span>
-                              <ChevronRight size={14} className="shrink-0 text-gray-9" />
-                            </button>
-                          ))}
+                          ] as const).map(([section, label]) => {
+                            const active = section === "employees"
+                              ? toolMenuSection === "employees" || toolMenuSection.startsWith("plugin:")
+                              : toolMenuSection === section;
+                            return (
+                              <button
+                                key={section}
+                                type="button"
+                                className={`mb-1 flex w-full items-center justify-between rounded-[16px] px-3 py-2.5 text-left text-sm transition-colors ${active ? "bg-gray-3 text-gray-12" : "text-gray-11 hover:bg-gray-2"}`}
+                                onClick={() => setToolMenuSection(section)}
+                              >
+                                <span className="truncate">{label}</span>
+                                <ChevronRight size={14} className="shrink-0 text-gray-9" />
+                              </button>
+                            );
+                          })}
                         </div>
                         <div className="max-h-72 overflow-y-auto p-2">
                           <div className="mb-2 flex justify-end border-b border-dls-border px-1 pb-2">
@@ -1412,6 +1412,53 @@ export function ReactSessionComposer(props: ComposerProps) {
                               {t("composer.configure")}
                             </button>
                           </div>
+                          {toolMenuSection === "employees" ? (
+                            pluginSections.length > 0 ? (
+                              <div className="grid gap-1">
+                                {pluginSections.map(({ plugin }) => {
+                                  const employee = employeeForPlugin(plugin);
+                                  const file = primaryPluginFile(plugin);
+                                  return (
+                                    <button
+                                      key={plugin.pluginId}
+                                      type="button"
+                                      className="flex w-full items-start gap-3 rounded-[16px] px-3 py-2.5 text-left text-gray-11 transition-colors hover:bg-gray-2/70 disabled:cursor-not-allowed disabled:opacity-60"
+                                      disabled={!file}
+                                      onClick={() => {
+                                        if (file) applyPluginFileSelection(file);
+                                      }}
+                                    >
+                                      {employee?.avatar ? (
+                                        <img
+                                          src={employee.avatar}
+                                          alt=""
+                                          className="mt-0.5 size-7 shrink-0 rounded-full border border-dls-border bg-white object-cover shadow-sm"
+                                          loading="lazy"
+                                        />
+                                      ) : (
+                                        <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-dls-border bg-gray-2">
+                                          <Plug size={13} className="text-gray-9" />
+                                        </div>
+                                      )}
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-center justify-between gap-3">
+                                          <div className="truncate text-xs font-semibold text-gray-11">{employee?.name ?? plugin.name}</div>
+                                          <span className="shrink-0 rounded-full bg-gray-3 px-2 py-0.5 text-[10px] font-medium text-gray-11">
+                                            {plugin.files.length} 项能力
+                                          </span>
+                                        </div>
+                                        <div className="truncate text-xs text-gray-10">
+                                          {employee?.role ?? plugin.description ?? "点击后添加到当前对话"}
+                                        </div>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="px-3 py-2 text-xs text-gray-10">数字员工将从插件配置自动同步。</div>
+                            )
+                          ) : null}
                           {toolMenuSection === "commands" ? (
                             toolCommandItems.length > 0 ? (
                               <div className="grid gap-1">
@@ -1516,6 +1563,14 @@ export function ReactSessionComposer(props: ComposerProps) {
                           {activePlugin ? (
                             activePlugin.files.length > 0 ? (
                               <div className="grid gap-1">
+                                <button
+                                  type="button"
+                                  className="mb-1 inline-flex w-fit items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium text-gray-10 transition-colors hover:bg-gray-2"
+                                  onClick={() => setToolMenuSection("employees")}
+                                >
+                                  <ChevronRight size={12} className="rotate-180" />
+                                  数字员工
+                                </button>
                                 {activePlugin.files.map((file) => (
                                   <button
                                     key={`${file.configObjectId}:${file.path}`}

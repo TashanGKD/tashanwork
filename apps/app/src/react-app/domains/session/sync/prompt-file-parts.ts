@@ -2,6 +2,7 @@ import type { FilePartInput } from "@opencode-ai/sdk/v2/client";
 
 const FIRST_LINE_LOCAL_PATH_RE = /(?:file:\/\/[^\s"'`<>]+|~\/[^\s"'`<>]+|[A-Za-z]:[\\/][^\s"'`<>]+|(?<![:/])\/[A-Za-z0-9._~+%/-]*[\/.][A-Za-z0-9._~+%/-]*)/g;
 const TRAILING_PUNCTUATION_RE = /[),.;:]+$/;
+const TASHAN_DIGITAL_EMPLOYEE_COMMAND_RE = /^\/tashan-digital-employees(?:\/|\s|$)/;
 
 function stripTrailingPunctuation(value: string) {
   return value.replace(TRAILING_PUNCTUATION_RE, "");
@@ -26,7 +27,11 @@ function normalizeFileUri(value: string) {
     if (parsed.protocol !== "file:") return "";
     const pathname = safeDecodeURIComponent(parsed.pathname);
     if (!pathname) return "";
+    if (/^\/[A-Za-z]:\//.test(pathname)) return pathname.slice(1);
     if (parsed.hostname && parsed.hostname.toLowerCase() !== "localhost") {
+      // `file://C:/path` is not a valid absolute file URL on Windows. It is
+      // parsed as host `c`, then crashes Node's fileURLToPath downstream.
+      if (/^[A-Za-z]$/i.test(parsed.hostname)) return "";
       return `//${parsed.hostname}${pathname}`;
     }
     return pathname;
@@ -65,14 +70,19 @@ function encodeFilePath(path: string) {
   return path.replace(/\\/g, "/").split("/").map(encodeURIComponent).join("/");
 }
 
-function toFileUrl(path: string) {
-  const normalized = path.replace(/\\/g, "/");
+export function localFilePathToFileUrl(path: string) {
+  const raw = path.trim().replace(/\\/g, "/");
+  const normalized = /^\/[A-Za-z]:\//.test(raw) ? raw.slice(1) : raw;
+  if (!normalized) return "";
   if (/^[A-Za-z]:\//.test(normalized)) return `file:///${encodeFilePath(normalized).replace(/^([A-Za-z])%3A/, "$1:")}`;
+  if (normalized.startsWith("//")) return `file://${encodeFilePath(normalized.replace(/^\/+/, ""))}`;
+  if (!normalized.startsWith("/")) return "";
   return `file://${encodeFilePath(normalized)}`;
 }
 
 export function firstLineLocalFileParts(text: string, workspaceRoot: string): FilePartInput[] {
   const firstLine = text.split(/\r?\n/, 1)[0] ?? "";
+  if (TASHAN_DIGITAL_EMPLOYEE_COMMAND_RE.test(firstLine.trim())) return [];
   const parts: FilePartInput[] = [];
   const seen = new Set<string>();
 
@@ -85,7 +95,7 @@ export function firstLineLocalFileParts(text: string, workspaceRoot: string): Fi
     parts.push({
       type: "file",
       mime: "text/plain",
-      url: toFileUrl(absolute),
+      url: localFilePathToFileUrl(absolute),
       filename: filenameFromPath(raw),
     });
   }

@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 
-import { assertOpencodeProxyAllowed } from "./server.js";
+import {
+  assertOpencodeProxyAllowed,
+  normalizeOpencodeFileUrl,
+  sanitizeOpencodeProxyBody,
+  sanitizeOpencodeRequestPayload,
+} from "./server.js";
 import { ApiError } from "./errors.js";
 import type { Actor, TokenScope } from "./types.js";
 
@@ -46,5 +51,68 @@ describe("assertOpencodeProxyAllowed", () => {
     expect(() =>
       assertOpencodeProxyAllowed(actor(undefined), "GET", "/opencode/permission"),
     ).not.toThrow();
+  });
+});
+
+describe("OpenCode proxy file URL sanitization", () => {
+  test("normalizes Windows file URLs before proxying to OpenCode", () => {
+    expect(normalizeOpencodeFileUrl("C:\\Users\\omar\\list.csv")).toBe("file:///C:/Users/omar/list.csv");
+    expect(normalizeOpencodeFileUrl("C:/Users/omar/list.csv")).toBe("file:///C:/Users/omar/list.csv");
+    expect(normalizeOpencodeFileUrl("/C:/Users/omar/list.csv")).toBe("file:///C:/Users/omar/list.csv");
+    expect(normalizeOpencodeFileUrl("file://C:/Users/omar/list.csv")).toBe("file:///C:/Users/omar/list.csv");
+    expect(normalizeOpencodeFileUrl("file:/C:/Users/omar/list.csv")).toBe("file:///C:/Users/omar/list.csv");
+    expect(normalizeOpencodeFileUrl("file:///C%3A/Users/omar/list.csv")).toBe("file:///C:/Users/omar/list.csv");
+  });
+
+  test("recursively normalizes file part URLs in prompt payloads", () => {
+    expect(
+      sanitizeOpencodeRequestPayload({
+        parts: [
+          {
+            type: "file",
+            url: "file://C:/Users/omar/list.csv",
+          },
+        ],
+      }),
+    ).toEqual({
+      parts: [
+        {
+          type: "file",
+          url: "file:///C:/Users/omar/list.csv",
+        },
+      ],
+    });
+  });
+
+  test("sanitizes JSON proxy body and removes stale content length", async () => {
+    const headers = new Headers({
+      "content-type": "application/json",
+      "content-length": "999",
+    });
+    const body = new TextEncoder().encode(
+      JSON.stringify({
+        parts: [{ type: "file", url: "file://C:/Users/omar/list.csv" }],
+      }),
+    ).buffer;
+
+    const sanitized = sanitizeOpencodeProxyBody(headers, body);
+    expect(headers.has("content-length")).toBe(false);
+    expect(JSON.parse(String(sanitized))).toEqual({
+      parts: [{ type: "file", url: "file:///C:/Users/omar/list.csv" }],
+    });
+  });
+
+  test("sanitizes prompt proxy JSON even when content type is missing", async () => {
+    const headers = new Headers();
+    const body = new TextEncoder().encode(
+      JSON.stringify({
+        parts: [{ type: "file", url: "C:\\Users\\omar\\list.csv" }],
+      }),
+    ).buffer;
+
+    const sanitized = sanitizeOpencodeProxyBody(headers, body, { forceJson: true });
+    expect(JSON.parse(String(sanitized))).toEqual({
+      parts: [{ type: "file", url: "file:///C:/Users/omar/list.csv" }],
+    });
   });
 });

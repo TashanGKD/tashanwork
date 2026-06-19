@@ -176,6 +176,44 @@ for (const file of files) {
   if (!isProductLayer && !isTouchedUiFile && /OpenWork|OpenCode/.test(text) && normalized.startsWith(`apps${sep}app${sep}src${sep}`)) {
     addWarning("base-layer-brand-reference", file, 1, "Base-layer OpenWork/OpenCode reference remains. CDP visible-text check decides whether this is user-facing.");
   }
+
+  if (
+    normalized.startsWith(`apps${sep}app${sep}src${sep}`) &&
+    normalized !== `apps${sep}app${sep}src${sep}react-app${sep}domains${sep}session${sep}sync${sep}prompt-file-parts.ts`
+  ) {
+    lines.forEach((line, index) => {
+      if (/file:\/\/\$\{/.test(line)) {
+        addProblem(
+          "direct-file-url-template",
+          file,
+          index + 1,
+          "Use localFilePathToFileUrl() for model file parts; direct file://${...} templates break Windows paths.",
+        );
+      }
+    });
+  }
+}
+
+const promptFilePartsTest = resolve(repoRoot, "apps/app/tests/prompt-file-parts.test.ts");
+if (existsSync(promptFilePartsTest)) {
+  const promptFilePartsTestText = readFileSync(promptFilePartsTest, "utf8");
+  for (const required of ["file://C:/Users/omar/list.csv", "/C:/Users/omar/list.csv", "localFilePathToFileUrl"]) {
+    if (!promptFilePartsTestText.includes(required)) {
+      errors.push({
+        kind: "missing-windows-file-url-test",
+        file: rel(promptFilePartsTest),
+        line: 1,
+        text: `prompt-file-parts tests must cover ${required}.`,
+      });
+    }
+  }
+} else {
+  errors.push({
+    kind: "missing-windows-file-url-test",
+    file: rel(promptFilePartsTest),
+    line: 1,
+    text: "prompt-file-parts test file is missing.",
+  });
 }
 
 const desktopIcon = resolve(repoRoot, "apps/desktop/resources/icons/icon.ico");

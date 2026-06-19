@@ -31,7 +31,7 @@ import type {
 } from "../../../../app/types";
 import { addOpencodeCacheHint, safeStringify } from "../../../../app/utils";
 import { clearSessionDraft, saveSessionDraft } from "./draft-store";
-import { firstLineLocalFileParts } from "./prompt-file-parts";
+import { firstLineLocalFileParts, localFilePathToFileUrl } from "./prompt-file-parts";
 import { appMentionInstruction } from "../surface/composer/app-mentions";
 
 type SessionModelConfig = {
@@ -176,9 +176,9 @@ export function createSessionActionsStore(options: {
       const trimmed = path.trim();
       if (!trimmed) return "";
       if (trimmed.startsWith("/")) return trimmed;
-      if (/^[a-zA-Z]:\\/.test(trimmed)) return trimmed;
+      if (/^[a-zA-Z]:[\\/]/.test(trimmed)) return trimmed.replace(/\\/g, "/");
       if (!root) return "";
-      return (root + "/" + trimmed).replace("//", "/");
+      return `${root.replace(/\\/g, "/")}/${trimmed.replace(/\\/g, "/")}`.replace(/([^:])\/{2,}/g, "$1/");
     };
     const filenameFromPath = (path: string) => {
       const normalized = path.replace(/\\/g, "/");
@@ -201,7 +201,7 @@ export function createSessionActionsStore(options: {
         parts.push({
           type: "file",
           mime: "text/plain",
-          url: `file://${absolute}`,
+          url: localFilePathToFileUrl(absolute),
           filename: filenameFromPath(part.path),
         } as FilePartInput);
       }
@@ -220,9 +220,9 @@ export function createSessionActionsStore(options: {
       const trimmed = path.trim();
       if (!trimmed) return "";
       if (trimmed.startsWith("/")) return trimmed;
-      if (/^[a-zA-Z]:\\/.test(trimmed)) return trimmed;
+      if (/^[a-zA-Z]:[\\/]/.test(trimmed)) return trimmed.replace(/\\/g, "/");
       if (!root) return "";
-      return (root + "/" + trimmed).replace("//", "/");
+      return `${root.replace(/\\/g, "/")}/${trimmed.replace(/\\/g, "/")}`.replace(/([^:])\/{2,}/g, "$1/");
     };
 
     const filenameFromPath = (path: string) => {
@@ -238,7 +238,7 @@ export function createSessionActionsStore(options: {
       parts.push({
         type: "file",
         mime: "text/plain",
-        url: `file://${absolute}`,
+        url: localFilePathToFileUrl(absolute),
         filename: filenameFromPath(part.path),
       } as FilePartInput);
     }

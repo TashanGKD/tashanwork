@@ -22,6 +22,7 @@ const outputArgIndex = process.argv.indexOf("--output");
 const keepAlive = process.argv.includes("--keep-alive");
 const checkKnowledgeStarter = process.argv.includes("--check-knowledge-starter");
 const checkPluginDigitalEmployee = process.argv.includes("--check-plugin-digital-employee");
+const checkLocalFilePrompt = process.argv.includes("--check-local-file-prompt");
 const complexReadmeScreenshot = process.argv.includes("--complex-readme-screenshot");
 const complexReadmeSubmit = process.argv.includes("--complex-readme-submit");
 const outputDir = outputArgIndex >= 0 && process.argv[outputArgIndex + 1]
@@ -65,6 +66,15 @@ function parseEnvFile(raw) {
 
 function sleep(ms) {
   return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}
+
+function withTimeout(promise, timeoutMs, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs),
+    ),
+  ]);
 }
 
 function maskSecret(value) {
@@ -420,6 +430,18 @@ async function checkPluginDigitalEmployeePath(client, outputDir) {
       employeeButton.click();
       await sleep(500);
 
+      let composer = window.__openwork?.slice?.("composer") ?? null;
+      let draft = String(composer?.draft || "");
+      if (draft.includes("/tashan-digital-employees/knowledge-navigator")) {
+        return {
+          ok: true,
+          hasDigitalEmployeeGroup,
+          directSelection: true,
+          draft,
+          bodyPreview: (document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 1200)
+        };
+      }
+
       const employeeLeft = employeeButton.getBoundingClientRect().left;
       const fileButton = buttons()
         .filter((button) => button !== employeeButton)
@@ -438,11 +460,12 @@ async function checkPluginDigitalEmployeePath(client, outputDir) {
       fileButton.click();
       await sleep(800);
 
-      const composer = window.__openwork?.slice?.("composer") ?? null;
-      const draft = String(composer?.draft || "");
+      composer = window.__openwork?.slice?.("composer") ?? null;
+      draft = String(composer?.draft || "");
       return {
         ok: draft.includes("/tashan-digital-employees/knowledge-navigator"),
         hasDigitalEmployeeGroup,
+        directSelection: false,
         draft,
         bodyPreview: (document.body.innerText || "").replace(/\\s+/g, " ").slice(0, 1200)
       };
@@ -455,6 +478,63 @@ async function checkPluginDigitalEmployeePath(client, outputDir) {
     ...sanitizeForEvidence(result),
     screenshot: screenshotCaptured ? screenshotPath : null,
   };
+}
+
+async function checkLocalFilePromptPath(opencode, sessionId, workspaceRoot, llm) {
+  const marker = `TASHAN_LOCAL_FILE_MARKER_${randomUUID().slice(0, 8)}`;
+  const probePath = join(workspaceRoot, "tashan-local-file-probe.txt");
+  await writeFile(
+    probePath,
+    [
+      "这是 TashanWork 本地文件引用验收文件。",
+      `验收标记：${marker}`,
+      "如果模型能够读取这个文件，请只输出：本地文件引用通过。",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const fileUrl = pathToFileURL(probePath).href;
+  const previousAssistantTexts = await listAssistantTexts(opencode, sessionId).catch(() => []);
+  let promptResult = null;
+  let promptError = null;
+  try {
+    promptResult = await withTimeout(
+      opencode.session.promptAsync({
+        sessionID: sessionId,
+        model: { providerID: "scnet", modelID: llm.modelID },
+        reasoning_effort: "low",
+        tools: { bash: false, edit: false, write: false, read: false },
+        system: [
+          "你正在进行 TashanWork 本地文件引用验收。",
+          "不要调用任何工具，不要解释，不要输出推理过程。",
+          "读取用户消息中的本地文件内容。",
+          "如果文件中包含验收标记，请最终只输出：本地文件引用通过。",
+        ].join("\n"),
+        parts: [
+          { type: "text", text: `读取附件文本文件，确认其中是否包含验收标记 ${marker}。如果包含，只输出：本地文件引用通过。` },
+          { type: "file", mime: "text/plain", url: fileUrl, filename: "tashan-local-file-probe.txt" },
+        ],
+      }),
+      90_000,
+      "local file promptAsync",
+    );
+  } catch (error) {
+    promptError = error instanceof Error ? error.message : String(error);
+  }
+  const accepted = !promptError && promptResult?.error === undefined;
+  const assistant = accepted
+    ? await waitForNewAssistant(opencode, sessionId, previousAssistantTexts, 120_000)
+    : { ok: false, preview: "", completed: false, error: promptResult?.error ?? promptError ?? "promptAsync failed" };
+
+  return sanitizeForEvidence({
+    ok: accepted && /本地文件引用通过/.test(assistant.preview ?? ""),
+    accepted,
+    fileUrl,
+    filename: "tashan-local-file-probe.txt",
+    assistantPreview: assistant.preview ?? "",
+    assistantCompleted: assistant.completed ?? false,
+    error: promptResult?.error ?? promptError ?? null,
+  });
 }
 
 async function prepareComplexReadmeScreenshot(client, outputDir, options = {}) {
@@ -915,6 +995,10 @@ async function main() {
       summary.artifacts.pluginDigitalEmployeeScreenshot = pluginDigitalEmployee.screenshot ?? null;
     }
 
+    if (checkLocalFilePrompt) {
+      summary.checks.localFilePrompt = await checkLocalFilePromptPath(opencode, session.id, workspaceRoot, llm);
+    }
+
     if (complexReadmeScreenshot || complexReadmeSubmit) {
       const previousAssistantTexts = complexReadmeSubmit
         ? await listAssistantTexts(opencode, session.id).catch(() => [])
@@ -964,6 +1048,7 @@ async function main() {
       !summary.checks.cdpVisibleText.containsReasoningPreamble &&
       (!checkKnowledgeStarter || summary.checks.knowledgeStarter?.ok === true) &&
       (!checkPluginDigitalEmployee || summary.checks.pluginDigitalEmployee?.ok === true) &&
+      (!checkLocalFilePrompt || summary.checks.localFilePrompt?.ok === true) &&
       (!complexReadmeScreenshot || summary.checks.complexReadmeScreenshot?.ok === true) &&
       (!complexReadmeSubmit || summary.checks.complexReadmeSubmission?.ok === true)
     );

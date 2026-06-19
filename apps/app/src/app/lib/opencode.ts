@@ -66,6 +66,83 @@ const OAUTH_OPENCODE_REQUEST_TIMEOUT_MS = 5 * 60_000;
 const MCP_AUTH_OPENCODE_REQUEST_TIMEOUT_MS = 90_000;
 const SESSION_LONG_RUNNING_URL_RE = /\/session\/[^/?#]+\/(?:command|prompt_async|summarize)(?:[?#]|$)/;
 
+export function normalizeOpencodeFileUrl(value: string): string {
+  const trimmed = value.trim();
+  if (/^[A-Za-z]:[\\/]/.test(trimmed)) {
+    return `file:///${trimmed.replace(/\\/g, "/")}`;
+  }
+  if (/^\/[A-Za-z]:\//.test(trimmed)) {
+    return "file://" + trimmed;
+  }
+  if (!trimmed.toLowerCase().startsWith("file:")) return value;
+
+  const rawPath = decodeURIComponent(trimmed.replace(/^file:\/+/i, "")).replace(/\\/g, "/");
+  if (/^[A-Za-z]:\//.test(rawPath)) {
+    return `file:///${rawPath}`;
+  }
+  if (/^\/[A-Za-z]:\//.test(rawPath)) {
+    return "file://" + rawPath;
+  }
+  return value;
+}
+
+export function sanitizeOpencodeRequestPayload(value: unknown): unknown {
+  if (typeof value === "string") return normalizeOpencodeFileUrl(value);
+  if (!value || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(sanitizeOpencodeRequestPayload);
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+      key,
+      sanitizeOpencodeRequestPayload(item),
+    ]),
+  );
+}
+
+function sanitizeJsonBodyText(body: string): string {
+  if (!body.trim()) return body;
+  try {
+    const parsed = JSON.parse(body);
+    const sanitized = sanitizeOpencodeRequestPayload(parsed);
+    return JSON.stringify(sanitized);
+  } catch {
+    return body;
+  }
+}
+
+function shouldSanitizeJsonBody(input: RequestInfo | URL, init?: RequestInit): boolean {
+  const headers =
+    init?.headers
+      ? new Headers(init.headers)
+      : typeof Request !== "undefined" && input instanceof Request
+        ? input.headers
+        : new Headers();
+  const contentType = headers.get("content-type") ?? headers.get("Content-Type") ?? "";
+  if (contentType.toLowerCase().includes("application/json")) return true;
+  return /\/session\/[^/?#]+\/(?:command|prompt|prompt_async)(?:[?#]|$)/.test(getRequestUrl(input));
+}
+
+async function sanitizeFetchInput(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<{ input: RequestInfo | URL; init?: RequestInit }> {
+  const initHeaders = init?.headers ? new Headers(init.headers) : null;
+  const requestHeaders = typeof Request !== "undefined" && input instanceof Request ? input.headers : null;
+  const headers = initHeaders ?? (requestHeaders ? new Headers(requestHeaders) : new Headers());
+  if (!shouldSanitizeJsonBody(input, init)) return { input, init };
+
+  if (typeof init?.body === "string") {
+    const nextBody = sanitizeJsonBodyText(init.body);
+    return { input, init: { ...init, body: nextBody, headers } };
+  }
+
+  if (typeof Request !== "undefined" && input instanceof Request && input.body) {
+    const nextBody = sanitizeJsonBodyText(await input.clone().text());
+    return { input: new Request(input, { body: nextBody, headers }), init: undefined };
+  }
+
+  return { input, init };
+}
+
 function getRequestUrl(input: RequestInfo | URL): string {
   if (typeof input === "string") return input;
   if (input instanceof URL) return input.toString();
@@ -111,13 +188,13 @@ async function postSessionRequest<T>(
   const response = await fetchImpl(`${baseUrl}${path}`, {
     method: "POST",
     headers,
-    body: JSON.stringify(body),
+    body: JSON.stringify(sanitizeOpencodeRequestPayload(body)),
   });
 
   const request = new Request(`${baseUrl}${path}`, {
     method: "POST",
     headers,
-    body: JSON.stringify(body),
+    body: JSON.stringify(sanitizeOpencodeRequestPayload(body)),
   });
 
   if (response.ok) {
@@ -305,7 +382,7 @@ const createDesktopFetch = (auth?: OpencodeAuth) => {
     headers.set("Authorization", authHeader);
   };
 
-  return (input: RequestInfo | URL, init?: RequestInit) => {
+  return async (input: RequestInfo | URL, init?: RequestInit) => {
     // Streams must go through the webview's native fetch to avoid the
     // Tauri HTTP plugin's `fetch_read_body` hang on never-closing bodies.
     const shouldStream = requestIsStreaming(input, init);
@@ -320,18 +397,23 @@ const createDesktopFetch = (auth?: OpencodeAuth) => {
       const headers = new Headers(input.headers);
       addAuth(headers);
       const request = new Request(input, { headers });
-      return fetchWithTimeout(underlyingFetch, request, undefined, timeoutMs);
+      const sanitized = await sanitizeFetchInput(request, undefined);
+      return fetchWithTimeout(underlyingFetch, sanitized.input, sanitized.init, timeoutMs);
     }
 
     const headers = new Headers(init?.headers);
     addAuth(headers);
-    return fetchWithTimeout(
-      underlyingFetch,
+    const sanitized = await sanitizeFetchInput(
       input,
       {
         ...init,
         headers,
       },
+    );
+    return fetchWithTimeout(
+      underlyingFetch,
+      sanitized.input,
+      sanitized.init,
       timeoutMs,
     );
   };
@@ -361,8 +443,10 @@ export function createClient(baseUrl: string, directory?: string, auth?: Opencod
 
   const fetchImpl = isDesktopRuntime()
     ? createDesktopFetch(auth)
-    : (input: RequestInfo | URL, init?: RequestInit) =>
-        fetchWithTimeout(globalThis.fetch, input, init, DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS);
+    : async (input: RequestInfo | URL, init?: RequestInit) => {
+        const sanitized = await sanitizeFetchInput(input, init);
+        return fetchWithTimeout(globalThis.fetch, sanitized.input, sanitized.init, DEFAULT_OPENCODE_REQUEST_TIMEOUT_MS);
+      };
   const client = createOpencodeClient({
     baseUrl,
     directory,

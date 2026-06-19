@@ -276,6 +276,7 @@ export function SessionPage(props: SessionPageProps) {
   const sessionSidePanel = useUiStateStore((state) => (
     props.selectedSessionId ? state.sidePanelState[props.selectedSessionId] ?? null : null
   ));
+  const sidePanelStateBySession = useUiStateStore((state) => state.sidePanelState);
   const voiceSidePanelOpen = useUiStateStore((state) => state.sidePanelState[GLOBAL_VOICE_SIDE_PANEL_KEY] === "voice");
   const setSidePanelState = useUiStateStore((state) => state.setSidePanelState);
   const toggleSidePanelState = useUiStateStore((state) => state.toggleSidePanelState);
@@ -339,6 +340,12 @@ export function SessionPage(props: SessionPageProps) {
     if (panel === "voice") return;
     setSidePanelState(props.selectedSessionId, panel);
   }, [props.selectedSessionId, setSidePanelState]);
+
+  useEffect(() => {
+    if (!props.selectedSessionId || !props.settingsSlot) return;
+    if (Object.prototype.hasOwnProperty.call(sidePanelStateBySession, props.selectedSessionId)) return;
+    setSidePanelState(props.selectedSessionId, "extensions");
+  }, [props.selectedSessionId, props.settingsSlot, setSidePanelState, sidePanelStateBySession]);
 
   const toggleCurrentSidePanel = useCallback((panel: SidePanelItem) => {
     if (panel === "voice") {

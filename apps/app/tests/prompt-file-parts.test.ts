@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 
-import { firstLineLocalFileParts } from "../src/react-app/domains/session/sync/prompt-file-parts";
+import {
+  firstLineLocalFileParts,
+  localFilePathToFileUrl,
+} from "../src/react-app/domains/session/sync/prompt-file-parts";
+import {
+  normalizeOpencodeFileUrl,
+  sanitizeOpencodeRequestPayload,
+} from "../src/app/lib/opencode";
 import { getSlashCommandQuery, parseSlashCommandInvocation } from "../src/react-app/domains/session/surface/composer/slash-command";
 
 describe("first-line local file parts", () => {
@@ -29,6 +36,15 @@ describe("first-line local file parts", () => {
     expect(parts).toEqual([]);
   });
 
+  test("does not treat Tashan digital employee commands as local files", () => {
+    expect(
+      firstLineLocalFileParts(
+        "/tashan-digital-employees/knowledge-navigator 整理当前项目资料",
+        "C:/Users/omar/code/openwork",
+      ),
+    ).toEqual([]);
+  });
+
   test("does not treat URL paths as local files", () => {
     const parts = firstLineLocalFileParts(
       "check https://example.com/research/list.csv",
@@ -36,6 +52,17 @@ describe("first-line local file parts", () => {
     );
 
     expect(parts).toEqual([]);
+  });
+
+  test("normalizes malformed Windows file URLs", () => {
+    expect(firstLineLocalFileParts("check file://C:/Users/omar/list.csv", "C:/Users/omar/code/openwork")).toEqual([
+      {
+        type: "file",
+        mime: "text/plain",
+        url: "file:///C:/Users/omar/list.csv",
+        filename: "list.csv",
+      },
+    ]);
   });
 
   test("detects Windows absolute paths in the first line", () => {
@@ -56,6 +83,43 @@ describe("first-line local file parts", () => {
         filename: "list.csv",
       },
     ]);
+  });
+
+  test("formats local Windows paths as absolute file URLs", () => {
+    expect(localFilePathToFileUrl("C:\\Users\\omar\\list.csv")).toBe("file:///C:/Users/omar/list.csv");
+    expect(localFilePathToFileUrl("C:/Users/omar/list.csv")).toBe("file:///C:/Users/omar/list.csv");
+    expect(localFilePathToFileUrl("/C:/Users/omar/list.csv")).toBe("file:///C:/Users/omar/list.csv");
+  });
+
+  test("normalizes file URLs at the OpenCode request boundary", () => {
+    expect(normalizeOpencodeFileUrl("C:\\Users\\omar\\list.csv")).toBe("file:///C:/Users/omar/list.csv");
+    expect(normalizeOpencodeFileUrl("C:/Users/omar/list.csv")).toBe("file:///C:/Users/omar/list.csv");
+    expect(normalizeOpencodeFileUrl("/C:/Users/omar/list.csv")).toBe("file:///C:/Users/omar/list.csv");
+    expect(normalizeOpencodeFileUrl("file://C:/Users/omar/list.csv")).toBe("file:///C:/Users/omar/list.csv");
+    expect(normalizeOpencodeFileUrl("file:/C:/Users/omar/list.csv")).toBe("file:///C:/Users/omar/list.csv");
+    expect(normalizeOpencodeFileUrl("file:///C%3A/Users/omar/list.csv")).toBe("file:///C:/Users/omar/list.csv");
+  });
+
+  test("recursively sanitizes OpenCode prompt payloads", () => {
+    expect(
+      sanitizeOpencodeRequestPayload({
+        parts: [
+          {
+            type: "file",
+            url: "C:\\Users\\omar\\list.csv",
+            filename: "list.csv",
+          },
+        ],
+      }),
+    ).toEqual({
+      parts: [
+        {
+          type: "file",
+          url: "file:///C:/Users/omar/list.csv",
+          filename: "list.csv",
+        },
+      ],
+    });
   });
 });
 

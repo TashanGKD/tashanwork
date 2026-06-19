@@ -520,6 +520,53 @@ function normalizeOpencodeProxyPath(proxyPath: string): string {
   return normalized || "/";
 }
 
+export function normalizeOpencodeFileUrl(value: string): string {
+  const trimmed = value.trim();
+  if (/^[A-Za-z]:[\\/]/.test(trimmed)) {
+    return `file:///${trimmed.replace(/\\/g, "/")}`;
+  }
+  if (/^\/[A-Za-z]:\//.test(trimmed)) {
+    return "file://" + trimmed;
+  }
+  if (!trimmed.toLowerCase().startsWith("file:")) return value;
+
+  const rawPath = decodeURIComponent(trimmed.replace(/^file:\/+/i, "")).replace(/\\/g, "/");
+  if (/^[A-Za-z]:\//.test(rawPath)) {
+    return `file:///${rawPath}`;
+  }
+  if (/^\/[A-Za-z]:\//.test(rawPath)) {
+    return "file://" + rawPath;
+  }
+  return value;
+}
+
+export function sanitizeOpencodeRequestPayload(value: unknown): unknown {
+  if (typeof value === "string") return normalizeOpencodeFileUrl(value);
+  if (!value || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(sanitizeOpencodeRequestPayload);
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => [
+      key,
+      sanitizeOpencodeRequestPayload(item),
+    ]),
+  );
+}
+
+export function sanitizeOpencodeProxyBody(headers: Headers, body: ArrayBuffer | undefined, options?: { forceJson?: boolean }): BodyInit | undefined {
+  if (!body || body.byteLength === 0) return undefined;
+  const contentType = headers.get("content-type") ?? "";
+  if (!options?.forceJson && !contentType.toLowerCase().includes("application/json")) return body;
+
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(body));
+    const sanitized = sanitizeOpencodeRequestPayload(parsed);
+    headers.delete("content-length");
+    return JSON.stringify(sanitized);
+  } catch {
+    return body;
+  }
+}
+
 export function assertOpencodeProxyAllowed(actor: Actor, method: string, proxyPath: string) {
   const m = method.toUpperCase();
   const scope = actor.scope ?? "viewer";
@@ -545,6 +592,10 @@ export function assertOpencodeProxyAllowed(actor: Actor, method: string, proxyPa
 
 function isSessionCommandProxyRequest(method: string, proxyPath: string) {
   return method === "POST" && /^\/session\/[^/]+\/command$/.test(normalizeOpencodeProxyPath(proxyPath));
+}
+
+function isSessionPromptBodyProxyRequest(method: string, proxyPath: string) {
+  return method === "POST" && /^\/session\/[^/]+\/(?:command|prompt|prompt_async)$/.test(normalizeOpencodeProxyPath(proxyPath));
 }
 
 export async function startServer(config: ServerConfig): Promise<ServeResult> {
@@ -809,9 +860,12 @@ async function proxyOpencodeRequest(input: {
   // Buffer the request body so it can be forwarded reliably across Node.js
   // stream boundaries (Readable.toWeb streams from the HTTP adapter aren't
   // always accepted directly by Node's global fetch as a body).
-  const body = method === "GET" || method === "HEAD"
+  const rawBody = method === "GET" || method === "HEAD"
     ? undefined
     : await input.request.arrayBuffer().then((buf) => (buf.byteLength > 0 ? buf : undefined));
+  const body = sanitizeOpencodeProxyBody(headers, rawBody, {
+    forceJson: isSessionPromptBodyProxyRequest(method, proxyPath),
+  });
   if (isSessionCommandProxyRequest(method, proxyPath)) {
     void fetch(targetUrl, {
       method,

@@ -99,7 +99,7 @@ import { buildOpenworkEnvSystemContext } from "@/react-app/domains/session/sync/
 import {
   applySessionRevert,
 } from "@/react-app/domains/session/sync/session-sync";
-import { firstLineLocalFileParts } from "@/react-app/domains/session/sync/prompt-file-parts";
+import { firstLineLocalFileParts, localFilePathToFileUrl } from "@/react-app/domains/session/sync/prompt-file-parts";
 import { useSessionInteractions } from "@/react-app/domains/session/sync/use-session-interactions";
 import { useModelBehavior } from "@/react-app/domains/session/surface/use-model-behavior";
 import { useModelPicker } from "@/react-app/domains/session/modals/use-model-picker";
@@ -243,9 +243,9 @@ async function draftToParts(draft: ComposerDraft, workspaceRoot: string) {
     const trimmed = path.trim();
     if (!trimmed) return "";
     if (trimmed.startsWith("/")) return trimmed;
-    if (/^[a-zA-Z]:\\/.test(trimmed)) return trimmed;
+    if (/^[a-zA-Z]:[\\/]/.test(trimmed)) return trimmed.replace(/\\/g, "/");
     if (!root) return "";
-    return `${root}/${trimmed}`.replace(/\/\/+/g, "/");
+    return `${root.replace(/\\/g, "/")}/${trimmed.replace(/\\/g, "/")}`.replace(/([^:])\/{2,}/g, "$1/");
   };
 
   const filenameFromPath = (path: string) => {
@@ -281,7 +281,7 @@ async function draftToParts(draft: ComposerDraft, workspaceRoot: string) {
       parts.push({
         type: "file",
         mime: "text/plain",
-        url: `file://${absolute}`,
+        url: localFilePathToFileUrl(absolute),
         filename: filenameFromPath(part.path),
       });
     }
