@@ -11,20 +11,13 @@ import {
 import { getSlashCommandQuery, parseSlashCommandInvocation } from "../src/react-app/domains/session/surface/composer/slash-command";
 
 describe("first-line local file parts", () => {
-  test("detects tilde paths in the first line", () => {
-    const parts = firstLineLocalFileParts(
+  test("does not implicitly attach tilde paths from typed text", () => {
+    expect(
+      firstLineLocalFileParts(
       "check ~/code/research/openwork-users/list.csv\nits a list of unique email domains",
       "/Users/omar/code/openwork",
-    );
-
-    expect(parts).toEqual([
-      {
-        type: "file",
-        mime: "text/plain",
-        url: "file:///Users/omar/code/research/openwork-users/list.csv",
-        filename: "list.csv",
-      },
-    ]);
+      ),
+    ).toEqual([]);
   });
 
   test("only detects paths from the first line", () => {
@@ -54,35 +47,13 @@ describe("first-line local file parts", () => {
     expect(parts).toEqual([]);
   });
 
-  test("normalizes malformed Windows file URLs", () => {
-    expect(firstLineLocalFileParts("check file://C:/Users/omar/list.csv", "C:/Users/omar/code/openwork")).toEqual([
-      {
-        type: "file",
-        mime: "text/plain",
-        url: "file:///C:/Users/omar/list.csv",
-        filename: "list.csv",
-      },
-    ]);
+  test("does not implicitly attach file URLs from typed text", () => {
+    expect(firstLineLocalFileParts("check file://C:/Users/omar/list.csv", "C:/Users/omar/code/openwork")).toEqual([]);
   });
 
-  test("detects Windows absolute paths in the first line", () => {
-    expect(firstLineLocalFileParts("check C:\\Users\\omar\\list.csv", "C:/Users/omar/code/openwork")).toEqual([
-      {
-        type: "file",
-        mime: "text/plain",
-        url: "file:///C:/Users/omar/list.csv",
-        filename: "list.csv",
-      },
-    ]);
-
-    expect(firstLineLocalFileParts("check C:/Users/omar/list.csv", "C:/Users/omar/code/openwork")).toEqual([
-      {
-        type: "file",
-        mime: "text/plain",
-        url: "file:///C:/Users/omar/list.csv",
-        filename: "list.csv",
-      },
-    ]);
+  test("does not implicitly attach Windows absolute paths from typed text", () => {
+    expect(firstLineLocalFileParts("check C:\\Users\\omar\\list.csv", "C:/Users/omar/code/openwork")).toEqual([]);
+    expect(firstLineLocalFileParts("check C:/Users/omar/list.csv", "C:/Users/omar/code/openwork")).toEqual([]);
   });
 
   test("formats local Windows paths as absolute file URLs", () => {
